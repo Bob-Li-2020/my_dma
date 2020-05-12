@@ -1,16 +1,12 @@
 //-- AUTHOR: LIBING
 //-- DATE: 2020.5
 //-- DESCRIPTION: 
-//-- DMA write(OCM->EXTERNAL): Move output featuremap from OCM to external.
+//-- DMA read(EXTERNAL->OCM): Move input featuremap from external to OCM.
 
-module dma_w 
+module dma_r 
 #(
 	//--------- AXI PARAMETERS -------
-    AXI_DW     = 128                 , // AXI DATA    BUS WIDTH
-    AXI_BYTES  = AXI_DW/8            , // BYTES NUMBER IN <AXI_DW>
-    AXI_WSTRBW = AXI_BYTES           , // AXI WSTRB BITS WIDTH
-    //--------- RAM ATTRIBUTES -------
-    RAM_WS     = 1                     // RAM MODEL READ WAIT STATES CYCLE
+    AXI_DW     = 128                   // AXI DATA    BUS WIDTH
 )(
     //---- USER GLOBAL --------------------------
     input  logic                    usr_clk     , // ram clock domain
@@ -21,21 +17,20 @@ module dma_w
     input  logic [31           : 0] cfg_src_sa  , // source start address
     input  logic [31           : 0] cfg_dst_sa  , // destination start address
     input  logic [31           : 0] cfg_len     , // DMA bytes number
-    //---- DMA WRITE CONFIGURE ------------------
-    output logic                    dmaw_valid  ,
-    input  logic                    dmaw_ready  ,
-    output logic [31           : 0] dmaw_sa     , // dma write start address   
-    output logic [31           : 0] dmaw_len    , // dma write length
-    //---- DMA WRITE DATA -----------------------
-    output logic [AXI_DW-1     : 0] dma_wdata   ,
-    output logic [AXI_WSTRBW-1 : 0] dma_wstrb   ,
-    output logic                    dma_wlast   ,
-    output logic                    dma_wvalid  ,
-    input  logic                    dma_wready  ,
+    //---- DMA READ CONFIGURE ------------------
+    output logic                    dmar_valid  ,
+    input  logic                    dmar_ready  ,
+    output logic [31           : 0] dmar_sa     , // dma read start address   
+    output logic [31           : 0] dmar_len    , // dma read length
+    //---- DMA READ DATA -----------------------
+    input  logic [AXI_DW-1     : 0] dma_rdata   ,
+    input  logic                    dma_rlast   ,
+    input  logic                    dma_rvalid  ,
+    output logic                    dma_rready  ,
     //---- RAM INTERFACE ------------------------
-    output logic                    ram_re      , // RAM read en
+    output logic                    ram_we      , // RAM write en
     output logic [31           : 0] ram_a       , // RAM address
-    input  logic [AXI_DW-1     : 0] ram_q         // RAM Q
+    output logic [AXI_DW-1     : 0] ram_d         // RAM D
 );
 
 timeunit 1ns;
@@ -73,11 +68,11 @@ assign wff_d      = ram_q            ;
 assign wff_rlast  = wff_re && wff_re_cc+1'b1==len;
 // cfg
 assign cfg_ready  = st_cur==IDLE && dmaw_ready;
-// dma write configure
+// dma read configure
 assign dmaw_valid = cfg_valid        ;
 assign dmaw_sa    = cfg_dst_sa       ;
 assign dmaw_len   = cfg_len          ;
-// dma write data
+// dma read data
 assign dma_wdata  = wff_q            ;
 assign dma_wstrb  = '1               ;
 assign dma_wlast  = dma_wvalid && wff_re_cc+1'b1==len;
@@ -143,31 +138,4 @@ sfifo #(
     .wfull  ( wff_wfull   ),
     .cnt    ( wff_cnt     ) 
 );
-
-//------- wait states control -------------
-generate 
-    if(RAM_WS==0) begin: WS0
-        assign ram_rvalid = ram_re   ;
-        assign wff_wafull = wff_wfull;
-    end: WS0
-    else begin: WS_N
-        logic [RAM_WS : 0] ram_re_ff   ;
-        logic [WFF_AW : 0] rff_wcnt_af ; // rff wcnt almost full
-        assign ram_rvalid = ram_re_ff[RAM_WS-1];
-        assign wff_wafull = rff_wcnt_af >= 2**WFF_AW;
-        always_ff @(posedge usr_clk or negedge usr_reset_n)
-            if(!usr_reset_n)
-                ram_re_ff <= '0;
-            else
-                ram_re_ff <= {ram_re_ff[RAM_WS-1:0], ram_re};
-
-        always_comb begin
-            rff_wcnt_af = wff_cnt;
-            for(int k=0;k<RAM_WS;k++) begin
-                rff_wcnt_af = rff_wcnt_af+ram_re_ff[k];
-            end
-        end
-    end: WS_N
-endgenerate
-
 endmodule
